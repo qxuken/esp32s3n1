@@ -11,65 +11,57 @@ use embedded_svc::{
 use serde::Deserialize;
 
 use crate::app_state::AppState;
+use maud::{html, Markup, DOCTYPE};
 
 // Max payload length
 const MAX_LEN: usize = 128;
 
-fn template(rgb: Rgb, flash: Option<String>) -> String {
-    format!(
-        r#"
-<!DOCTYPE html>
-<html>
-  <head>
-      <meta charset="utf-8">
-      <title>esp-rs web server</title>
-      <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-  </head>
-  <body hx-boost="true">
-{}
-  </body>
-</html>
-"#,
-        content(rgb, flash)
-    )
+fn template(rgb: Rgb, flash: Markup) -> Markup {
+    html! {
+        (DOCTYPE)
+        html {
+            head {
+                meta charset="utf-8";
+                title { "esp32s3" }
+                script src="https://unpkg.com/htmx.org@1.9.10" {}
+            }
+            body hx-boost="true" {
+                (content(rgb, flash))
+            }
+        }
+    }
 }
 
-fn flash_component(text: &str) -> String {
-    format!(
-        r#"
-        <h5>
-        {}
-        </h5>
-"#,
-        text
-    )
+fn flash(text: &str) -> Markup {
+    if text.is_empty() {
+        return html! {};
+    }
+    html! {
+        h5 { (text) }
+    }
 }
 
-fn content(rgb: Rgb, flash: Option<String>) -> String {
-    format!(
-        r##"
-{}
-<form hx-post="/set_rgb" hx-push-url="false" hx-target="body">
-
-    <div>
-        <label for="onboard_led">RGB Led color</label>
-        <input type="color" id="onboard_led" name="onboard_led" value="{}" />
-    </div>
-
-    <input type="submit" value="Update" />
-</form>
-"##,
-        flash.map(|f| flash_component(&f)).unwrap_or_default(),
-        rgb.to_css_hex_string()
-    )
+fn content(rgb: Rgb, flash: Markup) -> Markup {
+    html! {
+        (flash)
+        form hx-post="/set_rgb" hx-target="body" hx-trigger="change delay:500ms" {
+            div {
+                label for="onboard_led" {
+                    "RGB Lead color"
+                }
+                input type="color" id="onboard_led" name="onboard_led" value=(rgb.to_css_hex_string()) ;
+            }
+        }
+    }
 }
 
-fn index_html(rgb: Rgb, flash: Option<String>, only_body: bool) -> String {
+fn index_html(rgb: Rgb, flash: Markup, only_body: bool) -> String {
     if only_body {
         content(rgb, flash)
     } else {
         template(rgb, flash)
     }
+    .into_string()
 }
 
 fn register_index<'a>(
@@ -78,7 +70,7 @@ fn register_index<'a>(
 ) -> Result<()> {
     server.fn_handler("/", Method::Get, move |request| {
         let rgb_val = { app_state.clone().lock().unwrap().rgb_val };
-        let html = index_html(rgb_val, None, false);
+        let html = index_html(rgb_val, flash(""), false);
         let mut response = request.into_ok_response()?;
         response.write_all(html.as_bytes())?;
         Ok(())
@@ -117,12 +109,11 @@ fn register_set<'a>(
             }) {
             Ok(rgb) => {
                 app_state.clone().lock().unwrap().set_rgb(rgb)?;
-                Some("Updated".to_string())
+                flash(&format!("New color: {}", rgb.to_css_hex_string()))
             }
             Err(e) => {
                 log::error!("{:?}", e);
-                let message = format!("Bad Data: {}", e);
-                Some(message)
+                flash(&format!("Bad Data: {}", e))
             }
         };
 
